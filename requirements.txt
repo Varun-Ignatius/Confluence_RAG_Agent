@@ -1,0 +1,7 @@
+chromadb          # ChromaDB client
+langchain         # orchestration framework
+langchain-community  # Ollama + ChromaDB integrations
+ollama            # Ollama Python client (optional, langchain-community wraps it)
+python-dotenv     # load .env variables
+langchain_ollama
+langchain-chroma
