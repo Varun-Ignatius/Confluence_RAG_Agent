@@ -2,6 +2,7 @@ import chromadb
 import os
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
+
 from dotenv import load_dotenv
 
 load_dotenv() 
@@ -16,6 +17,7 @@ chroma_Client = chromadb.CloudClient(
 )
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
+
 vectorstore = Chroma(client=chroma_Client, collection_name= "confluence_docs", embedding_function=embeddings)
 
 def retrievel(query: str, n_results: int = 5):
@@ -25,9 +27,7 @@ def retrievel(query: str, n_results: int = 5):
 
 
 if __name__ == "__main__":
-    query = "I've recieved error code ERR-EDI-837-VAL, what might be the root cause"
-    results = retrievel(query)
-    print(results)
+    pass  # retrieval is invoked from RAG_Agent.py
 
 
 

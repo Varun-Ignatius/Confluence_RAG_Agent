@@ -5,3 +5,4 @@ ollama            # Ollama Python client (optional, langchain-community wraps it
 python-dotenv     # load .env variables
 langchain_ollama
 langchain-chroma
+langchain-core
