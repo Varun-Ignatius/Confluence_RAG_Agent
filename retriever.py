@@ -5,8 +5,9 @@ import chromadb
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
+from langfuse import observe
 
-# Configure module-level logger
+# ── Logger ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
@@ -14,7 +15,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ── Environment ──────────────────────────────────────────────────────────────
+# ── Environment ───────────────────────────────────────────────────────────────
 load_dotenv()
 
 chroma_api_key = os.getenv("chroma_api_key")
@@ -62,8 +63,13 @@ except Exception as e:
 
 
 # ── Retrieval function ────────────────────────────────────────────────────────
+@observe(name="retrieve-confluence-docs")  # creates a Langfuse span for every retrieval call
 def retrievel(query: str, n_results: int = 5) -> list[str]:
-    """Retrieve the top-n relevant document chunks for the given query."""
+    """Retrieve the top-n relevant document chunks for the given query.
+
+    The @observe decorator adds this function as a named span inside the
+    active Langfuse trace, recording the query input and chunk count output.
+    """
     logger.info("retrievel called | query=%r | n_results=%d", query, n_results)
     try:
         retriever = vectorstore.as_retriever(search_kwargs={"k": n_results})

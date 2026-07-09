@@ -6,3 +6,4 @@ python-dotenv     # load .env variables
 langchain_ollama
 langchain-chroma
 langchain-core
+langfuse          # LLM observability & tracing
