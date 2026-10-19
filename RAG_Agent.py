@@ -90,7 +90,7 @@ def ask_agent(query: str) -> str:
 
 
 if __name__ == "__main__":
-    query = "Claims failed due to Member Not Found, what might be the root cause"
+    query = "What is the default severity of an eligibility verification failure involving 270/271 EDI transactions, and when should it be escalated to P2?"
     try:
         response = ask_agent(query)
         print(response)
