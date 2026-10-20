@@ -254,11 +254,26 @@ def avg_relevance(*, item_results, **kwargs) -> Evaluation:
 
 # ── Summary printer ────────────────────────────────────────────────────────────
 
-def print_summary(result) -> None:
-    """Print a human-readable eval summary to stdout."""
-    print("\n" + "=" * 70)
-    print("  CONFLUENCE RAG AGENT — EVAL SUMMARY")
-    print("=" * 70)
+def print_summary(result, experiment_name: str) -> None:
+    """Print a human-readable eval summary to stdout and write it to a .txt file.
+
+    The output file is always saved as:
+        eval_results_<experiment_name>.txt
+    in the same directory as this script.
+    """
+    output_path = Path(__file__).parent / f"eval_results_{experiment_name}.txt"
+    lines: list[str] = []
+
+    def tee(text: str = "") -> None:
+        """Write a line to both stdout and the in-memory buffer."""
+        print(text)
+        lines.append(text)
+
+    tee("\n" + "=" * 70)
+    tee("  CONFLUENCE RAG AGENT — EVAL SUMMARY")
+    tee(f"  Experiment  : {experiment_name}")
+    tee(f"  Timestamp   : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    tee("=" * 70)
 
     item_results = result.item_results
     total = len(item_results)
@@ -278,27 +293,31 @@ def print_summary(result) -> None:
         if item_pass:
             passed += 1
 
-        status = "✅ PASS" if item_pass else "❌ FAIL"
+        status = "PASS" if item_pass else "FAIL"
         question = r.item.input.get("question", "")[:70]
-        print(f"\n  {status} | Q: {question}...")
+        tee(f"\n  [{status}] Q: {question}...")
         if faith_score is not None:
-            print(f"         faithfulness={faith_score:.2f}  ({faith_ev.comment})")
+            tee(f"         faithfulness={faith_score:.2f}  ({faith_ev.comment})")
         if rel_score is not None:
-            print(f"         relevance   ={rel_score:.2f}  ({rel_ev.comment})")
+            tee(f"         relevance   ={rel_score:.2f}  ({rel_ev.comment})")
 
     # Run-level scores
     run_evals = result.run_evaluations if hasattr(result, "run_evaluations") else []
     avg_f = next((e.value for e in run_evals if e.name == "avg_faithfulness"), None)
     avg_r = next((e.value for e in run_evals if e.name == "avg_relevance"),    None)
 
-    print("\n" + "-" * 70)
-    print(f"  Total items : {total}")
-    print(f"  Passed      : {passed} / {total}  (threshold ≥ {PASS_THRESHOLD})")
+    tee("\n" + "-" * 70)
+    tee(f"  Total items : {total}")
+    tee(f"  Passed      : {passed} / {total}  (threshold >= {PASS_THRESHOLD})")
     if avg_f is not None:
-        print(f"  Avg Faithfulness : {avg_f:.2%}")
+        tee(f"  Avg Faithfulness : {avg_f:.2%}")
     if avg_r is not None:
-        print(f"  Avg Relevance    : {avg_r:.2%}")
-    print("=" * 70 + "\n")
+        tee(f"  Avg Relevance    : {avg_r:.2%}")
+    tee("=" * 70 + "\n")
+
+    # Write to file
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+    logger.info("Eval summary written to %s", output_path)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -340,8 +359,8 @@ def main() -> None:
         max_concurrency=1,   # keep at 1 for local Ollama to avoid overloading
     )
 
-    # Step 3: print summary
-    print_summary(result)
+    # Step 3: print summary (also writes to eval_results_<experiment>.txt)
+    print_summary(result, experiment_name=args.experiment)
 
     # Step 4: flush Langfuse traces
     langfuse.flush()

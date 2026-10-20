@@ -68,7 +68,7 @@ def ask_agent(query: str) -> str:
     logger.info("ask_agent called with query: %r", query)
     try:
         # --- Retrieval ---
-        chunks = retrievel(query, n_results=3)
+        chunks = retrievel(query, n_results=5)
         if not chunks:
             logger.warning("No chunks retrieved for query: %r", query)
         else:

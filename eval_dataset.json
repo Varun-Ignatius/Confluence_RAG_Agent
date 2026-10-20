@@ -13,8 +13,8 @@
       "question": "A 270 eligibility request returns an AAA rejection with AAA03 = 79 and the message 'payer not found.' What is the likely root cause, and how should it be confirmed?"
     },
     "expected_output": {
-      "ground_truth": "The likely root cause is an invalid or outdated payer ID mapping. Confirm whether the payer ID was recently changed or retired and review the 270 request and payer ID configuration. A correct payer ID may be selected manually as a temporary workaround, subject to applicable approval requirements for master payer table updates.",
-      "reference": "Root cause: Invalid or outdated payer ID mapping. Confirmation: AAA reject 'payer not found' (AAA03 = 79); check whether the payer ID was recently changed or retired. Workaround: Temporarily select the correct payer ID manually in the registration screen. Updating the master payer table requires approval."
+      "ground_truth": "The likely root cause is an invalid or outdated payer ID mapping. Confirm whether the payer ID was recently changed or retired, and compare the payer ID in the 270 against the clearinghouse's current payer list. As a temporary workaround, the correct payer ID can be selected manually in the registration screen; updating the master payer table requires approval.",
+      "reference": "Root cause: Invalid or outdated payer ID mapping. Confirmation: AAA reject 'payer not found' / invalid payer ID (AAA03 = 79); the payer ID was recently changed or retired; compare the payer ID in the 270 against the clearinghouse's current payer list. Workaround: Temporarily select the correct payer ID manually in the registration screen. Updating the master payer table needs approval."
     }
   },
   {
@@ -31,8 +31,8 @@
       "question": "The clearinghouse logs show that a raw 271 response was received successfully, but the patient's coverage fields are not updated in the registration account. What should the support team investigate, and how should the issue be resolved?"
     },
     "expected_output": {
-      "ground_truth": "Investigate the 271 response parser and interface logs to determine why the response was not processed or posted to the account. Fix the parser or interface defect, send a test eligibility request for a known-good test patient, confirm a valid 271 response is processed correctly, rerun failed requests or batches for affected appointments if needed, and verify with registration leads that coverage details populate correctly.",
-      "reference": "Root cause: Response not parsed or posted back to the account. Confirmation: The raw 271 is received but coverage fields on the account are not updated; check parser or interface logs. Resolution: Fix the root cause, send a test eligibility request for a known-good test patient and confirm a valid 271, rerun failed requests or batches for affected appointments, and ask registration leads to confirm coverage details populate correctly."
+      "ground_truth": "Investigate the parser or interface logs to determine why the 271 response was not parsed or posted back to the account. Fix the response parser or interface defect and escalate to the Registration application dev team. Then send a test eligibility request for a known-good test patient and confirm a valid 271, re-run the failed requests or batches for the affected appointments, and ask registration leads to confirm that coverage details populate correctly. Finally, document the root cause, time window, and number of accounts affected.",
+      "reference": "Root cause: Response not parsed or posted back to the account. Confirmation: The raw 271 is received but the coverage fields on the account are not updated; check the parser or interface logs. Resolution: Fix the root cause (the response parser or interface defect; escalate to the Registration application dev team), send a test eligibility request for a known-good test patient and confirm a valid 271, re-run the failed batch or requests for the affected appointments, ask registration leads to confirm coverage details populate correctly, and document the root cause, time window and number of accounts affected."
     }
   },
   {
@@ -40,8 +40,8 @@
       "question": "Eligibility failures have continued for 35 minutes and are affecting multiple payers. Who should be notified, and what precautions must be followed when sharing diagnostic information?"
     },
     "expected_output": {
-      "ground_truth": "Escalate to the Patient Access Manager and Integration L3 because the issue has remained unresolved for more than 30 minutes. Contact clearinghouse support if a clearinghouse outage or credential problem is identified. Share diagnostic samples containing PHI only through approved secure channels, mask identifiers in tickets, use the minimum necessary data when contacting payers, and do not retain or screenshot patient insurance details outside approved systems.",
-      "reference": "Escalation: Failures not resolved in 30 minutes or all payers affected must be escalated to the Patient Access Manager and Integration L3. Clearinghouse outages or credential problems go to clearinghouse support. Compliance: Eligibility requests and responses contain PHI. Share samples only through approved secure channels, mask identifiers in tickets, use only the minimum necessary data when contacting payers, and do not retain or screenshot patient insurance details outside approved systems."
+      "ground_truth": "Escalate to the Patient Access Manager and Integration L3 because the failures have not been resolved within 30 minutes, and raise the severity to P2. Contact clearinghouse support if a clearinghouse outage or credential problem is identified. Share diagnostic samples containing PHI only through approved secure channels, mask identifiers in tickets, use only the minimum necessary data when contacting payers, and do not retain or screenshot patient insurance details outside approved systems.",
+      "reference": "Escalation: Not resolved in 30 minutes, or all payers affected (also raise severity to P2) -> Patient Access Manager + Integration L3. Clearinghouse outage or credential problem -> Clearinghouse support. Compliance: Eligibility requests and responses contain PHI. Share samples only through approved secure channels and mask identifiers in tickets, use only the minimum necessary data when contacting payers, and do not retain or screenshot patient insurance details outside approved systems."
     }
   }
 ]

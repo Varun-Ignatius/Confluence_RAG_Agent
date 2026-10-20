@@ -1,0 +1,33 @@
+
+======================================================================
+  CONFLUENCE RAG AGENT — EVAL SUMMARY
+  Experiment  : rag-eval-20261020-114103
+  Timestamp   : 2026-10-20 11:41:28
+======================================================================
+
+  [FAIL] Q: Eligibility failures have continued for 35 minutes and are affecting m...
+         faithfulness=0.50  (Answer partially supports context by referencing section 8, but does not directly address who should be notified and precautions for sharing diagnostic information.)
+         relevance   =0.00  (The answer discusses compliance notes but does not address who should be notified or precautions for eligibility failures.)
+
+  [FAIL] Q: The clearinghouse logs show that a raw 271 response was received succe...
+         faithfulness=0.50  (The answer partially supports the context, as it identifies rate limiting or batch overload as a possible cause, but does not provide enough detail on how to resolve the issue.)
+         relevance   =0.80  (The answer addresses the question but does not provide a complete solution, missing information on how to resolve the issue)
+
+  [FAIL] Q: The eligibility service is failing for all payers. How should registra...
+         faithfulness=1.00  (The answer is directly supported by the context, stating that registration staff should proceed with the insurance card and queue accounts for batch re-verification once the service is restored.)
+         relevance   =0.50  (The answer addresses the issue of queuing accounts but does not provide guidance on how to proceed with registration staff while the service is unavailable.)
+
+  [FAIL] Q: A 270 eligibility request returns an AAA rejection with AAA03 = 79 and...
+         faithfulness=0.50  (Answer partially supports the context by mentioning a comparison against the clearinghouse's current payer list, but fails to explicitly state the payer ID was expired or invalid.)
+         relevance   =0.80  (Answer addresses the question but lacks specificity on how to confirm the payer ID not being found.)
+
+  [FAIL] Q: What is the default severity of an eligibility verification failure in...
+         faithfulness=0.00  (Parse error)
+         relevance   =0.50  (The answer partially addresses the question, providing the severity level, but does not specify when the severity should be escalated to P2)
+
+----------------------------------------------------------------------
+  Total items : 5
+  Passed      : 0 / 5  (threshold >= 0.7)
+  Avg Faithfulness : 50.00%
+  Avg Relevance    : 52.00%
+======================================================================

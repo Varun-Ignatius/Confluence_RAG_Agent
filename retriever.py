@@ -72,7 +72,14 @@ def retrievel(query: str, n_results: int = 5) -> list[str]:
     """
     logger.info("retrievel called | query=%r | n_results=%d", query, n_results)
     try:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": n_results})
+        retriever = vectorstore.as_retriever(
+            search_type="mmr",
+            search_kwargs={
+                "k": n_results,      # final number of chunks returned to the LLM
+                "fetch_k": 20,       # candidate pool size before MMR re-ranking
+                "lambda_mult": 0.5,  # 0 = max diversity, 1 = max similarity
+            },
+        )
         docs = retriever.invoke(query)
         logger.info("Retrieved %d document(s) from vectorstore.", len(docs))
         return [doc.page_content for doc in docs]

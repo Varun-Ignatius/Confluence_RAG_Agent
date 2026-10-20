@@ -1,0 +1,33 @@
+
+======================================================================
+  CONFLUENCE RAG AGENT — EVAL SUMMARY
+  Experiment  : rag-eval-20261020-113546
+  Timestamp   : 2026-10-20 11:36:14
+======================================================================
+
+  [FAIL] Q: Eligibility failures have continued for 35 minutes and are affecting m...
+         faithfulness=0.50  (answer partially supports the context, but lacks specific details on who should be notified and how to handle sharing diagnostic information in a manner consistent with point 8. of Section 8.)
+         relevance   =0.50  (The answer partially addresses the question, focusing on notification procedures but not explicitly addressing precautions for sharing diagnostic information with multiple payers.)
+
+  [FAIL] Q: The clearinghouse logs show that a raw 271 response was received succe...
+         faithfulness=0.50  (The answer partially supports the context by suggesting the support team investigate the parser or mapping defect, but it lacks direct evidence from the provided context.)
+         relevance   =0.00  (Answer does not address the question and instead mentions a lack of relevant information in the documentation.)
+
+  [FAIL] Q: The eligibility service is failing for all payers. How should registra...
+         faithfulness=0.50  (The answer partially supports the context, but only mentions applying the financial clearance policy without addressing the root cause of the failure for all payers.)
+         relevance   =0.00  (The answer does not address the question of how registration staff should proceed during the service unavailability, it only provides guidance on when to proceed with financial clearance.)
+
+  [FAIL] Q: A 270 eligibility request returns an AAA rejection with AAA03 = 79 and...
+         faithfulness=1.00  (The answer directly references the context (point 3) to identify the likely root cause and suggests a confirmatory action to verify the issue.)
+         relevance   =0.00  (The answer does not address the question as it only provides a general explanation without providing a clear and specific cause of the issue.)
+
+  [FAIL] Q: What is the default severity of an eligibility verification failure in...
+         faithfulness=0.50  (The answer partially supports the context, stating the default severity is P3 and escalation criteria, but does not directly quote the context for the severity.)
+         relevance   =0.50  (The answer provides a severity level but does not specify when it should be escalated to P2 for 270/271 EDI transactions.)
+
+----------------------------------------------------------------------
+  Total items : 5
+  Passed      : 0 / 5  (threshold >= 0.7)
+  Avg Faithfulness : 60.00%
+  Avg Relevance    : 20.00%
+======================================================================

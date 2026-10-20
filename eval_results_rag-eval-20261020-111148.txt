@@ -1,0 +1,33 @@
+
+======================================================================
+  CONFLUENCE RAG AGENT — EVAL SUMMARY
+  Experiment  : rag-eval-20261020-111148
+  Timestamp   : 2026-10-20 11:12:16
+======================================================================
+
+  [FAIL] Q: Eligibility failures have continued for 35 minutes and are affecting m...
+         faithfulness=0.50  (Answer partially supports the context by referencing compliance notes, but lacks specific information on who should be notified and precautions to follow when sharing diagnostic information.)
+         relevance   =0.50  (The answer partially addresses the question but misses key parts, specifically who should be notified and precautions for sharing diagnostic information.)
+
+  [FAIL] Q: The clearinghouse logs show that a raw 271 response was received succe...
+         faithfulness=0.50  (The answer partially supports the context, as it suggests investigating the 'Parser or mapping defect' but does not explicitly reference the required resolution steps and potential next actions as provided in the context.)
+         relevance   =0.50  (The answer addresses the symptom but not the root cause of the issue, and lacks a clear step-by-step resolution.)
+
+  [FAIL] Q: The eligibility service is failing for all payers. How should registra...
+         faithfulness=0.50  (Registration staff proceed with the insurance card and collect the information, but the answer lacks direct evidence from the context about queuing accounts for batch re-verification once the service is restored.)
+         relevance   =0.50  (The answer addresses the issue of registration staff's next steps while the service is unavailable, but does not provide sufficient guidance on how to handle specific situations or potential consequences.)
+
+  [FAIL] Q: A 270 eligibility request returns an AAA rejection with AAA03 = 79 and...
+         faithfulness=0.50  (The answer partially supports the context, but does not address all claims or provide additional evidence beyond the given context.)
+         relevance   =0.50  (The answer addresses the rejection message but does not provide a clear explanation of why the payer was not found or how to confirm the root cause.)
+
+  [FAIL] Q: What is the default severity of an eligibility verification failure in...
+         faithfulness=0.50  (Answer partially supports the context, as the default severity of P3 is stated, but the escalation condition to P2 is not explicitly defined.)
+         relevance   =0.50  (The answer partially addresses the question by stating the default severity level but lacks specific escalation criteria for P2.)
+
+----------------------------------------------------------------------
+  Total items : 5
+  Passed      : 0 / 5  (threshold >= 0.7)
+  Avg Faithfulness : 50.00%
+  Avg Relevance    : 50.00%
+======================================================================
