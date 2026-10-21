@@ -6,12 +6,20 @@ Pipeline
 1. Loads the local eval_dataset.json
 2. Uploads each item to a named Langfuse dataset (creates it if it doesn't exist)
 3. Runs a Langfuse experiment that:
-   a. Calls ask_agent() for every dataset item
-   b. Scores each response with two LLM-as-a-judge evaluators:
-      - faithfulness  : does the answer stay within the retrieved context?
-      - relevance     : does the answer actually address the question?
+   a. Calls ask_agent_with_context() for every dataset item, keeping the exact
+      chunks the LLM saw so the judges score against the same context
+   b. Scores each response with four LLM-as-a-judge evaluators:
+      - faithfulness   : is every claim in the answer supported by the retrieved context?
+      - relevance      : does the answer address every part of the question?
+      - correctness    : does the answer contain the key facts of the ground truth?
+      - context_recall : does the retrieved context contain the key facts of the reference?
+                         (diagnostic — separates retrieval failures from generation failures)
 4. Computes run-level averages and posts them back to Langfuse
 5. Prints a human-readable summary to stdout
+
+Each judge breaks its task into items (claims / question parts / facts) and
+scores each one; the final score is the mean. This is far more stable than
+asking a small model for a single holistic number.
 
 Usage
 -----
@@ -34,8 +42,7 @@ from dotenv import load_dotenv
 from langfuse import Evaluation, Langfuse, get_client
 from langchain_ollama import OllamaLLM
 
-from RAG_Agent import ask_agent, build_prompt
-from retriever import retrievel
+from RAG_Agent import ask_agent_with_context
 
 # ── Environment & logging ──────────────────────────────────────────────────────
 load_dotenv()
@@ -54,12 +61,28 @@ DATASET_FILE = Path(__file__).parent / "eval_dataset.json"
 # Scoring thresholds used in the summary report
 PASS_THRESHOLD = 0.7   # score >= this is considered a pass
 
+# Metrics an item must pass; context_recall is reported but is a retrieval
+# diagnostic, not a judgement of the answer itself
+PASS_METRICS = ["faithfulness", "relevance", "correctness"]
+ALL_METRICS = PASS_METRICS + ["context_recall"]
+
+# How many times to re-ask the judge if its output can't be parsed
+JUDGE_MAX_ATTEMPTS = 3
+
 # ── Judge LLM (reuses the same local Ollama model) ────────────────────────────
-judge_llm = OllamaLLM(model="llama3.2")
+# temperature=0 makes verdicts reproducible; format="json" forces valid JSON output.
+# A stronger judge model than the one being evaluated will give more reliable scores.
+judge_llm = OllamaLLM(model="llama3.2", temperature=0, format="json")
 
 # ── Judge prompt templates ─────────────────────────────────────────────────────
+# Every judge returns the same shape so one parser handles all of them:
+#   {"items": [{"text": "...", "score": 0 | 0.5 | 1}], "reason": "..."}
+JUDGE_OUTPUT_FORMAT = """\
+Return ONLY a JSON object in exactly this shape, nothing else:
+{{"items": [{{"text": "<the item>", "score": <0, 0.5 or 1>}}], "reason": "<one sentence summary>"}}"""
+
 FAITHFULNESS_PROMPT = """\
-You are an objective evaluator. Your job is to assess whether an answer is
+You are an objective evaluator. Your job is to check whether an answer is
 faithful to the provided context — i.e. it makes no claims that are not
 supported by the context.
 
@@ -72,17 +95,19 @@ Question:
 Answer:
 {answer}
 
-Score the faithfulness on a scale from 0.0 to 1.0:
-  1.0 = every claim in the answer is directly supported by the context
-  0.5 = answer is partially supported; some claims are not in the context
-  0.0 = answer contradicts or ignores the context entirely
+Step 1: List every distinct factual claim made in the answer.
+Step 2: Score each claim:
+  1   = the claim is directly supported by the context
+  0.5 = the claim is loosely implied by the context but not stated
+  0   = the claim is not in the context or contradicts it
+A statement that the documentation does not cover something counts as
+supported (1) if the context indeed does not cover it.
 
-Return ONLY a JSON object with two fields, nothing else:
-{{"score": <float>, "reason": "<one sentence>"}}"""
+""" + JUDGE_OUTPUT_FORMAT
 
 RELEVANCE_PROMPT = """\
-You are an objective evaluator. Your job is to assess whether an answer
-actually addresses the question that was asked.
+You are an objective evaluator. Your job is to check whether an answer
+addresses every part of the question that was asked.
 
 Question:
 {question}
@@ -90,49 +115,138 @@ Question:
 Answer:
 {answer}
 
-Score the relevance on a scale from 0.0 to 1.0:
-  1.0 = the answer directly and completely addresses the question
-  0.5 = the answer is related but misses key parts of the question
-  0.0 = the answer does not address the question at all
+Step 1: Split the question into its distinct parts (sub-questions). A question
+like "What is X, and when should Y happen?" has two parts.
+Step 2: Score each part:
+  1   = the answer addresses this part directly and specifically
+  0.5 = the answer touches on this part but is vague or incomplete
+  0   = the answer does not address this part
 
-Return ONLY a JSON object with two fields, nothing else:
-{{"score": <float>, "reason": "<one sentence>"}}"""
+""" + JUDGE_OUTPUT_FORMAT
+
+CORRECTNESS_PROMPT = """\
+You are an objective evaluator. Your job is to check whether an answer contains
+the key facts of a reference (ground truth) answer.
+
+Question:
+{question}
+
+Reference answer:
+{ground_truth}
+
+Answer to evaluate:
+{answer}
+
+Step 1: List each key fact in the reference answer.
+Step 2: Score each fact:
+  1   = the answer states this fact (paraphrasing is fine)
+  0.5 = the answer mentions it only vaguely or partially
+  0   = the answer omits or contradicts this fact
+
+""" + JUDGE_OUTPUT_FORMAT
+
+CONTEXT_RECALL_PROMPT = """\
+You are an objective evaluator. Your job is to check whether retrieved context
+contains the information needed to answer a question.
+
+Question:
+{question}
+
+Reference information:
+{reference}
+
+Retrieved context:
+{context}
+
+Step 1: List each key fact in the reference information.
+Step 2: Score each fact:
+  1   = the retrieved context contains this fact
+  0.5 = the retrieved context contains it only partially
+  0   = the retrieved context does not contain this fact
+
+""" + JUDGE_OUTPUT_FORMAT
+
+RETRY_SUFFIX = """
+
+Your previous response could not be parsed. Respond with ONLY the JSON object
+in the exact shape described above, with a non-empty "items" list."""
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _parse_judge_output(raw: str) -> tuple[float, str]:
+def _parse_judge_output(raw: str) -> tuple[float, str] | None:
     """Extract (score, reason) from the judge LLM's JSON output.
 
-    Falls back gracefully if the model wraps JSON in markdown fences or adds
-    extra prose before/after the JSON block.
+    The score is the mean of the per-item scores. Returns None if the output
+    can't be parsed or contains no scored items, so the caller can retry.
     """
     # Strip markdown code fences if present
     cleaned = re.sub(r"```(?:json)?", "", raw).strip()
-    # Find the first {...} block
-    match = re.search(r"\{.*?\}", cleaned, re.DOTALL)
-    if not match:
-        logger.warning("Judge output did not contain valid JSON: %r", raw)
-        return 0.0, "Could not parse judge output"
     try:
-        data = json.loads(match.group())
-        score = float(data.get("score", 0.0))
-        reason = str(data.get("reason", ""))
-        return max(0.0, min(1.0, score)), reason  # clamp to [0, 1]
-    except (json.JSONDecodeError, ValueError) as exc:
-        logger.warning("Failed to parse judge JSON (%s): %r", exc, raw)
-        return 0.0, "Parse error"
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # Fall back to the outermost {...} block in case of surrounding prose
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if not match:
+            logger.warning("Judge output did not contain JSON: %r", raw)
+            return None
+        try:
+            data = json.loads(match.group())
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to parse judge JSON (%s): %r", exc, raw)
+            return None
+
+    try:
+        items = data.get("items") or []
+        scores = [max(0.0, min(1.0, float(it["score"]))) for it in items]  # clamp to [0, 1]
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        logger.warning("Judge JSON has unexpected shape (%s): %r", exc, raw)
+        return None
+    if not scores:
+        logger.warning("Judge returned no scored items: %r", raw)
+        return None
+
+    breakdown = "; ".join(
+        f"{it.get('text', '?')} = {float(it['score']):g}" for it in items
+    )
+    reason = f"{data.get('reason', '')} [{breakdown}]".strip()
+    return sum(scores) / len(scores), reason
 
 
-def _run_judge(prompt_template: str, **kwargs) -> tuple[float, str]:
-    """Fill a judge prompt template and call the local LLM."""
+def _run_judge(prompt_template: str, **kwargs) -> tuple[float | None, str]:
+    """Fill a judge prompt template and call the local LLM.
+
+    Retries with a format reminder if the output can't be parsed. Returns a
+    score of None (rather than 0.0) if the judge never produces usable output,
+    so judge failures don't drag down the averages.
+    """
     prompt = prompt_template.format(**kwargs)
-    try:
-        raw = judge_llm.invoke(prompt)
-        return _parse_judge_output(raw)
-    except Exception as exc:
-        logger.error("Judge LLM call failed: %s", exc)
-        return 0.0, f"Judge error: {exc}"
+    for attempt in range(1, JUDGE_MAX_ATTEMPTS + 1):
+        try:
+            raw = judge_llm.invoke(prompt if attempt == 1 else prompt + RETRY_SUFFIX)
+        except Exception as exc:
+            logger.error("Judge LLM call failed: %s", exc)
+            return None, f"Judge error: {exc}"
+        parsed = _parse_judge_output(raw)
+        if parsed is not None:
+            return parsed
+        logger.warning("Judge attempt %d/%d unparseable.", attempt, JUDGE_MAX_ATTEMPTS)
+    return None, f"Judge output unparseable after {JUDGE_MAX_ATTEMPTS} attempts"
+
+
+def _format_context(chunks: list[str]) -> str:
+    """Join chunks with labels so the judge can tell them apart."""
+    if not chunks:
+        return "(no context retrieved)"
+    return "\n---\n".join(f"[Chunk {i}]\n{c}" for i, c in enumerate(chunks, start=1))
+
+
+def _to_evaluation(name: str, score: float | None, reason: str) -> Evaluation | list:
+    """Wrap a judge result; unscored items return [] so no fake 0 is recorded."""
+    logger.info("%s score=%s | reason=%s", name, score, reason)
+    if score is None:
+        return []
+    return Evaluation(name=name, value=round(score, 4), comment=reason)
 
 
 # ── Dataset upload ─────────────────────────────────────────────────────────────
@@ -167,13 +281,12 @@ def rag_task(*, item, **kwargs) -> dict:
     """Run the RAG pipeline for one dataset item.
 
     Returns a dict so the evaluators can access both the generated answer and
-    the retrieved chunks (needed for the faithfulness judge).
+    the exact chunks the LLM was given (needed for faithfulness and recall).
     """
     question = item.input["question"]
     logger.info("Running RAG for: %r", question[:80])
 
-    chunks = retrievel(question, n_results=3)
-    answer = ask_agent(question)
+    answer, chunks = ask_agent_with_context(question)
 
     return {
         "answer": answer,
@@ -183,73 +296,78 @@ def rag_task(*, item, **kwargs) -> dict:
 
 # ── Evaluators ─────────────────────────────────────────────────────────────────
 
-def faithfulness_evaluator(*, input, output, expected_output, **kwargs) -> Evaluation:
-    """Score: is the answer grounded in the retrieved context?"""
-    question = input["question"]
-    answer = output.get("answer", "")
-    chunks = output.get("chunks", [])
-    context = "\n---\n".join(chunks) if chunks else "(no context retrieved)"
-
+def faithfulness_evaluator(*, input, output, expected_output, **kwargs):
+    """Score: is every claim in the answer grounded in the retrieved context?"""
     score, reason = _run_judge(
         FAITHFULNESS_PROMPT,
-        context=context,
-        question=question,
-        answer=answer,
+        context=_format_context(output.get("chunks", [])),
+        question=input["question"],
+        answer=output.get("answer", ""),
     )
-    logger.info("Faithfulness score=%.2f | reason=%s", score, reason)
-    return Evaluation(name="faithfulness", value=score, comment=reason)
+    return _to_evaluation("faithfulness", score, reason)
 
 
-def relevance_evaluator(*, input, output, expected_output, **kwargs) -> Evaluation:
-    """Score: does the answer actually address the question?"""
-    question = input["question"]
-    answer = output.get("answer", "")
-
+def relevance_evaluator(*, input, output, expected_output, **kwargs):
+    """Score: does the answer address every part of the question?"""
     score, reason = _run_judge(
         RELEVANCE_PROMPT,
-        question=question,
-        answer=answer,
+        question=input["question"],
+        answer=output.get("answer", ""),
     )
-    logger.info("Relevance score=%.2f | reason=%s", score, reason)
-    return Evaluation(name="relevance", value=score, comment=reason)
+    return _to_evaluation("relevance", score, reason)
+
+
+def correctness_evaluator(*, input, output, expected_output, **kwargs):
+    """Score: does the answer contain the key facts of the ground truth?"""
+    ground_truth = (expected_output or {}).get("ground_truth")
+    if not ground_truth:
+        return []
+    score, reason = _run_judge(
+        CORRECTNESS_PROMPT,
+        question=input["question"],
+        ground_truth=ground_truth,
+        answer=output.get("answer", ""),
+    )
+    return _to_evaluation("correctness", score, reason)
+
+
+def context_recall_evaluator(*, input, output, expected_output, **kwargs):
+    """Score: did retrieval return the facts needed to answer the question?"""
+    reference = (expected_output or {}).get("reference")
+    if not reference:
+        return []
+    score, reason = _run_judge(
+        CONTEXT_RECALL_PROMPT,
+        question=input["question"],
+        reference=reference,
+        context=_format_context(output.get("chunks", [])),
+    )
+    return _to_evaluation("context_recall", score, reason)
 
 
 # ── Run-level evaluators ───────────────────────────────────────────────────────
 
-def avg_faithfulness(*, item_results, **kwargs) -> Evaluation:
-    """Compute average faithfulness across all items in the run."""
-    scores = [
-        ev.value
-        for r in item_results
-        for ev in r.evaluations
-        if ev.name == "faithfulness" and ev.value is not None
-    ]
-    if not scores:
-        return Evaluation(name="avg_faithfulness", value=None)
-    avg = sum(scores) / len(scores)
-    return Evaluation(
-        name="avg_faithfulness",
-        value=round(avg, 4),
-        comment=f"Average faithfulness across {len(scores)} item(s): {avg:.2%}",
-    )
+def _make_avg_evaluator(metric: str):
+    """Build a run-level evaluator that averages one item-level metric."""
 
+    def avg_evaluator(*, item_results, **kwargs) -> Evaluation:
+        scores = [
+            ev.value
+            for r in item_results
+            for ev in r.evaluations
+            if ev.name == metric and ev.value is not None
+        ]
+        if not scores:
+            return Evaluation(name=f"avg_{metric}", value=None)
+        avg = sum(scores) / len(scores)
+        return Evaluation(
+            name=f"avg_{metric}",
+            value=round(avg, 4),
+            comment=f"Average {metric} across {len(scores)} item(s): {avg:.2%}",
+        )
 
-def avg_relevance(*, item_results, **kwargs) -> Evaluation:
-    """Compute average relevance across all items in the run."""
-    scores = [
-        ev.value
-        for r in item_results
-        for ev in r.evaluations
-        if ev.name == "relevance" and ev.value is not None
-    ]
-    if not scores:
-        return Evaluation(name="avg_relevance", value=None)
-    avg = sum(scores) / len(scores)
-    return Evaluation(
-        name="avg_relevance",
-        value=round(avg, 4),
-        comment=f"Average relevance across {len(scores)} item(s): {avg:.2%}",
-    )
+    avg_evaluator.__name__ = f"avg_{metric}"
+    return avg_evaluator
 
 
 # ── Summary printer ────────────────────────────────────────────────────────────
@@ -280,15 +398,11 @@ def print_summary(result, experiment_name: str) -> None:
     passed = 0
 
     for r in item_results:
-        faith_ev = next((e for e in r.evaluations if e.name == "faithfulness"), None)
-        rel_ev   = next((e for e in r.evaluations if e.name == "relevance"),    None)
+        evs = {e.name: e for e in r.evaluations}
 
-        faith_score = faith_ev.value if faith_ev else None
-        rel_score   = rel_ev.value   if rel_ev   else None
-
-        item_pass = (
-            (faith_score is not None and faith_score >= PASS_THRESHOLD) and
-            (rel_score   is not None and rel_score   >= PASS_THRESHOLD)
+        item_pass = all(
+            m in evs and evs[m].value is not None and evs[m].value >= PASS_THRESHOLD
+            for m in PASS_METRICS
         )
         if item_pass:
             passed += 1
@@ -296,23 +410,25 @@ def print_summary(result, experiment_name: str) -> None:
         status = "PASS" if item_pass else "FAIL"
         question = r.item.input.get("question", "")[:70]
         tee(f"\n  [{status}] Q: {question}...")
-        if faith_score is not None:
-            tee(f"         faithfulness={faith_score:.2f}  ({faith_ev.comment})")
-        if rel_score is not None:
-            tee(f"         relevance   ={rel_score:.2f}  ({rel_ev.comment})")
+        for m in ALL_METRICS:
+            ev = evs.get(m)
+            if ev is not None and ev.value is not None:
+                tee(f"         {m:<15}={ev.value:.2f}  ({ev.comment})")
+            else:
+                tee(f"         {m:<15}=n/a   (not scored — judge failed or no reference)")
 
     # Run-level scores
     run_evals = result.run_evaluations if hasattr(result, "run_evaluations") else []
-    avg_f = next((e.value for e in run_evals if e.name == "avg_faithfulness"), None)
-    avg_r = next((e.value for e in run_evals if e.name == "avg_relevance"),    None)
+    run_avgs = {e.name: e.value for e in run_evals}
 
     tee("\n" + "-" * 70)
     tee(f"  Total items : {total}")
-    tee(f"  Passed      : {passed} / {total}  (threshold >= {PASS_THRESHOLD})")
-    if avg_f is not None:
-        tee(f"  Avg Faithfulness : {avg_f:.2%}")
-    if avg_r is not None:
-        tee(f"  Avg Relevance    : {avg_r:.2%}")
+    tee(f"  Passed      : {passed} / {total}  "
+        f"(all of {', '.join(PASS_METRICS)} >= {PASS_THRESHOLD})")
+    for m in ALL_METRICS:
+        avg = run_avgs.get(f"avg_{m}")
+        if avg is not None:
+            tee(f"  Avg {m:<15}: {avg:.2%}")
     tee("=" * 70 + "\n")
 
     # Write to file
@@ -352,10 +468,18 @@ def main() -> None:
     logger.info("Starting experiment: '%s'", args.experiment)
     result = dataset.run_experiment(
         name=args.experiment,
-        description="Automated eval: faithfulness + relevance scoring via llama3.2 judge.",
+        description=(
+            "Automated eval: faithfulness + relevance + correctness + context recall "
+            "scoring via llama3.2 judge."
+        ),
         task=rag_task,
-        evaluators=[faithfulness_evaluator, relevance_evaluator],
-        run_evaluators=[avg_faithfulness, avg_relevance],
+        evaluators=[
+            faithfulness_evaluator,
+            relevance_evaluator,
+            correctness_evaluator,
+            context_recall_evaluator,
+        ],
+        run_evaluators=[_make_avg_evaluator(m) for m in ALL_METRICS],
         max_concurrency=1,   # keep at 1 for local Ollama to avoid overloading
     )
 

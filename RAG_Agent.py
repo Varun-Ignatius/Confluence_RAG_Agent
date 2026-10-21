@@ -26,7 +26,8 @@ except Exception as e:
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 try:
-    llm = OllamaLLM(model="llama3.2")
+    # temperature=0 keeps answers deterministic so eval runs are comparable
+    llm = OllamaLLM(model="llama3.2", temperature=0)
     logger.info("OllamaLLM model 'llama3.2' initialised successfully.")
 except Exception as e:
     logger.critical("Failed to initialise OllamaLLM: %s", e, exc_info=True)
@@ -34,11 +35,28 @@ except Exception as e:
 
 SYSTEM_PROMPT = """You are a helpful assistant for internal Confluence documentation.
 Answer the user's question using ONLY the context provided below.
-If the answer is not in the context, say: "I couldn't find relevant information in the documentation."
-Be concise and cite which part of the context you used.
+
+Instructions:
+1. Questions often ask several things at once (e.g. "what is X and when should Y happen?",
+   "what is the cause and how is it confirmed?", "who should be notified and what precautions apply?").
+   Identify every part of the question and answer EACH part explicitly, one bullet per part,
+   starting each bullet with a short label for the part it answers.
+2. Include the specific facts from the context: severity levels, codes, time thresholds,
+   team or role names, and step-by-step actions. Quote these values exactly as written.
+3. Do not refer to the context by position (e.g. "see section 8" or "point 3");
+   state the actual content instead.
+4. Ignore context that is about a different system or issue type than the question.
+5. The context is often a flattened table: a row label (e.g. "All payers failing") is followed
+   by its details in the same line. Match the situation in the question to these row labels.
+6. Only if, after checking every chunk, a part of the question is truly not covered, write
+   "The documentation does not cover this." as the answer to that part. Never add it as an extra bullet.
+   If nothing in the context is relevant, say: "I couldn't find relevant information in the documentation."
+
 Context:
 {context}
+
 Question: {question}
+
 Answer:"""
 
 
@@ -59,7 +77,16 @@ def build_prompt(query: str, chunks: list) -> str:
 
 
 def ask_agent(query: str) -> str:
+    """Retrieve relevant chunks and query the LLM; returns only the answer."""
+    answer, _ = ask_agent_with_context(query)
+    return answer
+
+
+def ask_agent_with_context(query: str) -> tuple[str, list[str]]:
     """Retrieve relevant chunks and query the LLM.
+
+    Returns (answer, chunks) so callers such as the eval harness can judge the
+    answer against exactly the context the LLM saw.
 
     Each call creates a Langfuse trace that captures:
       - the retrieval span (via @observe in retriever.py)
@@ -82,7 +109,7 @@ def ask_agent(query: str) -> str:
         logger.info("Invoking LLM (Langfuse tracing: %s)...", "ON" if callbacks else "OFF")
         response = llm.invoke(prompt, config={"callbacks": callbacks})
         logger.info("LLM responded successfully.")
-        return response
+        return response, chunks
 
     except Exception as e:
         logger.error("Error in ask_agent for query %r: %s", query, e, exc_info=True)
