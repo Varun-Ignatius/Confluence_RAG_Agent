@@ -1,7 +1,8 @@
 import logging
 from langchain_ollama import OllamaLLM
 from langfuse.langchain import CallbackHandler as LangfuseCallbackHandler
-from retriever import retrievel
+from langchain_core.documents import Document
+from retriever import retrieve_documents
 
 # ── Logger ────────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -33,7 +34,12 @@ except Exception as e:
     logger.critical("Failed to initialise OllamaLLM: %s", e, exc_info=True)
     raise
 
-SYSTEM_PROMPT = """You are a helpful assistant for internal Confluence documentation.
+# Exact reply the LLM gives when nothing relevant is retrieved; the MCP server
+# checks for it to set `found=False`.
+NOT_FOUND_MESSAGE = "I couldn't find relevant information in the documentation."
+
+# f-string: {{context}} / {{question}} stay as placeholders for build_prompt()
+SYSTEM_PROMPT = f"""You are a helpful assistant for internal Confluence documentation.
 Answer the user's question using ONLY the context provided below.
 
 Instructions:
@@ -50,12 +56,12 @@ Instructions:
    by its details in the same line. Match the situation in the question to these row labels.
 6. Only if, after checking every chunk, a part of the question is truly not covered, write
    "The documentation does not cover this." as the answer to that part. Never add it as an extra bullet.
-   If nothing in the context is relevant, say: "I couldn't find relevant information in the documentation."
+   If nothing in the context is relevant, say: "{NOT_FOUND_MESSAGE}"
 
 Context:
-{context}
+{{context}}
 
-Question: {question}
+Question: {{question}}
 
 Answer:"""
 
@@ -76,17 +82,27 @@ def build_prompt(query: str, chunks: list) -> str:
         raise
 
 
-def ask_agent(query: str) -> str:
+def ask_agent(query: str, n_results: int = 5) -> str:
     """Retrieve relevant chunks and query the LLM; returns only the answer."""
-    answer, _ = ask_agent_with_context(query)
+    answer, _ = ask_agent_with_documents(query, n_results)
     return answer
 
 
-def ask_agent_with_context(query: str) -> tuple[str, list[str]]:
+def ask_agent_with_context(query: str, n_results: int = 5) -> tuple[str, list[str]]:
     """Retrieve relevant chunks and query the LLM.
 
     Returns (answer, chunks) so callers such as the eval harness can judge the
     answer against exactly the context the LLM saw.
+    """
+    answer, docs = ask_agent_with_documents(query, n_results)
+    return answer, [doc.page_content for doc in docs]
+
+
+def ask_agent_with_documents(query: str, n_results: int = 5) -> tuple[str, list[Document]]:
+    """Retrieve relevant chunks and query the LLM.
+
+    Returns (answer, documents) so callers such as the MCP server can cite the
+    Confluence pages (title / URL in each document's metadata) the answer used.
 
     Each call creates a Langfuse trace that captures:
       - the retrieval span (via @observe in retriever.py)
@@ -95,7 +111,8 @@ def ask_agent_with_context(query: str) -> tuple[str, list[str]]:
     logger.info("ask_agent called with query: %r", query)
     try:
         # --- Retrieval ---
-        chunks = retrievel(query, n_results=5)
+        docs = retrieve_documents(query, n_results=n_results)
+        chunks = [doc.page_content for doc in docs]
         if not chunks:
             logger.warning("No chunks retrieved for query: %r", query)
         else:
@@ -109,7 +126,7 @@ def ask_agent_with_context(query: str) -> tuple[str, list[str]]:
         logger.info("Invoking LLM (Langfuse tracing: %s)...", "ON" if callbacks else "OFF")
         response = llm.invoke(prompt, config={"callbacks": callbacks})
         logger.info("LLM responded successfully.")
-        return response, chunks
+        return response, docs
 
     except Exception as e:
         logger.error("Error in ask_agent for query %r: %s", query, e, exc_info=True)

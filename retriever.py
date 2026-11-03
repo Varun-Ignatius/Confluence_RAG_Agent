@@ -4,6 +4,7 @@ import os
 import chromadb
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
 from langchain_ollama import OllamaEmbeddings
 from langfuse import observe
 
@@ -63,14 +64,22 @@ except Exception as e:
 
 
 # ── Retrieval function ────────────────────────────────────────────────────────
-@observe(name="retrieve-confluence-docs")  # creates a Langfuse span for every retrieval call
 def retrievel(query: str, n_results: int = 5) -> list[str]:
-    """Retrieve the top-n relevant document chunks for the given query.
+    """Retrieve the top-n relevant document chunks' text for the given query."""
+    return [doc.page_content for doc in retrieve_documents(query, n_results)]
+
+
+@observe(name="retrieve-confluence-docs")  # creates a Langfuse span for every retrieval call
+def retrieve_documents(query: str, n_results: int = 5) -> list[Document]:
+    """Retrieve the top-n relevant document chunks, with their metadata.
+
+    Each Document's metadata carries the Confluence page's title, source
+    (page URL), id and when (last updated).
 
     The @observe decorator adds this function as a named span inside the
     active Langfuse trace, recording the query input and chunk count output.
     """
-    logger.info("retrievel called | query=%r | n_results=%d", query, n_results)
+    logger.info("retrieve_documents called | query=%r | n_results=%d", query, n_results)
     try:
         retriever = vectorstore.as_retriever(
             search_type="mmr",
@@ -82,7 +91,7 @@ def retrievel(query: str, n_results: int = 5) -> list[str]:
         )
         docs = retriever.invoke(query)
         logger.info("Retrieved %d document(s) from vectorstore.", len(docs))
-        return [doc.page_content for doc in docs]
+        return docs
     except Exception as e:
         logger.error(
             "Error retrieving documents for query %r: %s", query, e, exc_info=True

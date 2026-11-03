@@ -11,3 +11,6 @@ langfuse          # LLM observability & tracing
 # ── API server ──────────────────────────────────────────────────────────────
 fastapi           # REST API framework
 uvicorn[standard] # ASGI server (includes websockets + reload support)
+
+# ── MCP server ──────────────────────────────────────────────────────────────
+mcp>=2,<3         # Model Context Protocol SDK (mcp_server.py uses the v2 MCPServer API)
